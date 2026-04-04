@@ -111,7 +111,7 @@ wechat-cli init
 
 在某些 macOS 系统上，即使使用了 `sudo`，`init` 也可能报 `task_for_pid failed`。这是 macOS 的安全策略限制了进程内存访问。
 
-**WeChat CLI 会自动尝试修复此问题**——对微信重新签名以获取必要权限。按提示操作即可：
+**WeChat CLI 会自动尝试修复此问题**——对微信重新签名以获取必要权限（会保留微信原有权限）。按提示操作即可：
 
 1. 工具会自动对微信重新签名
 2. 完全退出微信（不是最小化）
@@ -134,7 +134,7 @@ sudo codesign --force --sign - --entitlements /dev/stdin /Applications/WeChat.ap
 EOF
 ```
 
-> 注意：如果微信自动更新了，可能需要重新执行签名。
+> **说明：** 重新签名是安全的，**不会**导致封号或账号异常。但可能影响微信的自动更新功能，如果微信提示更新但失败，从官网重新下载安装即可，然后重新执行 `sudo wechat-cli init`。
 
 ### 第二步 — 开始使用
 

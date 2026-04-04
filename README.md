@@ -113,7 +113,7 @@ If you're unsure which WeChat account is currently active, navigate to the data 
 
 On some macOS systems, `init` may fail with `task_for_pid failed` even when running with `sudo`. This is due to macOS security restrictions on process memory access.
 
-**WeChat CLI will automatically attempt to fix this** by re-signing WeChat with the required entitlement. Just follow the on-screen instructions:
+**WeChat CLI will automatically attempt to fix this** by re-signing WeChat with the required entitlement (original entitlements are preserved). Just follow the on-screen instructions:
 
 1. The tool will re-sign WeChat automatically
 2. Quit WeChat completely (not just minimize)
@@ -136,7 +136,7 @@ sudo codesign --force --sign - --entitlements /dev/stdin /Applications/WeChat.ap
 EOF
 ```
 
-> Note: If WeChat auto-updates, you may need to re-sign it again.
+> **Heads up:** Re-signing WeChat is safe and will **not** cause account issues or bans. However, it may affect WeChat's auto-update mechanism. If WeChat prompts you to update but fails, simply re-download and install WeChat from the official website, then re-run `sudo wechat-cli init`.
 
 ### Step 2 — Use It
 
