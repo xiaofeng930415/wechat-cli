@@ -6,8 +6,11 @@ import click
 
 from .core.context import AppContext
 
+_VERSION = "0.2.2"
+
 
 @click.group()
+@click.version_option(version=_VERSION, prog_name="wechat-cli")
 @click.option("--config", "config_path", default=None, envvar="WECHAT_CLI_CONFIG",
               help="config.json 路径（默认自动查找）")
 @click.pass_context
@@ -26,8 +29,8 @@ def cli(ctx, config_path):
       wechat-cli contacts --query "李"              # 搜索联系人
       wechat-cli new-messages                       # 获取增量新消息
     """
-    # init 命令不需要 AppContext
-    if ctx.invoked_subcommand == "init":
+    # init/version 命令不需要 AppContext
+    if ctx.invoked_subcommand in ("init", "version"):
         return
 
     try:
