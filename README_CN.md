@@ -107,6 +107,16 @@ wechat-cli init
 
 ![init-claude-code-4](image/init-claude-code-4.png)
 
+#### macOS：提前开启终端的完全磁盘访问权限
+
+在执行 `init` 之前，请确保已为终端开启**完全磁盘访问权限**：
+
+1. 打开 **系统设置 → 隐私与安全性 → 完全磁盘访问权限**
+2. 添加你使用的终端应用（如 Terminal、iTerm2 或 IDE 内置终端）
+3. 开启后重启终端
+
+未开启此权限会导致工具无法访问微信数据目录，密钥提取将失败。
+
 #### macOS 遇到 `task_for_pid failed` 错误？
 
 在某些 macOS 系统上，即使使用了 `sudo`，`init` 也可能报 `task_for_pid failed`。这是 macOS 的安全策略限制了进程内存访问。

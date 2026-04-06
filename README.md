@@ -109,6 +109,16 @@ If you're unsure which WeChat account is currently active, navigate to the data 
 
 ![init-claude-code-4](image/init-claude-code-4.png)
 
+#### macOS: Grant Full Disk Access to Terminal
+
+Before running `init`, make sure your terminal app has **Full Disk Access**:
+
+1. Open **System Settings → Privacy & Security → Full Disk Access**
+2. Add your terminal app (e.g. Terminal, iTerm2, or the terminal in your IDE)
+3. Restart the terminal after enabling
+
+Without this permission, the tool cannot access WeChat's data directory and key extraction will fail.
+
 #### macOS: `task_for_pid failed` Error
 
 On some macOS systems, `init` may fail with `task_for_pid failed` even when running with `sudo`. This is due to macOS security restrictions on process memory access.
