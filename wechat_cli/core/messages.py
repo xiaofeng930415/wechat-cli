@@ -105,14 +105,38 @@ def decompress_content(content, ct):
             return _zstd_dctx.decompress(content).decode('utf-8', errors='replace')
         except Exception:
             return None
+    if ct and ct == 10 and isinstance(content, bytes):
+        import lz4.block
+        for i in range(20):
+            try:
+                res = lz4.block.decompress(content[i:]).decode('utf-8', errors='ignore')
+                if 'md5="' in res or '<msg>' in res:
+                    return res
+            except:
+                pass
+        for i in range(20):
+            try:
+                size = int.from_bytes(content[i:i+4], 'little')
+                res = lz4.block.decompress(content[i+4:], uncompressed_size=size).decode('utf-8', errors='ignore')
+                if 'md5="' in res or '<msg>' in res:
+                    return res
+            except:
+                pass
+        
+        # If decompression fails, try to extract md5 directly from binary bytes
+        # It's usually a 32-char hex string near the string 'md5="' or just inside XML tags.
+        try:
+            # decode with ignore to get a string where we can run regex
+            return content.decode('utf-8', errors='ignore')
+        except:
+            pass
+        return content.decode('utf-8', errors='replace')
     if isinstance(content, bytes):
         try:
             return content.decode('utf-8', errors='replace')
         except Exception:
             return None
     return content
-
-
 # ---- 内容解析 ----
 
 def _parse_message_content(content, local_type, is_group):
@@ -222,7 +246,29 @@ def _format_voip_message_text(content):
     return f"[通话] {status_map.get(raw_text, raw_text)}"
 
 
-def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_username=None):
+
+def _extract_md5_from_xml(content, base_type):
+    if not content:
+        return None
+    # For lz4 content that we couldn't decompress properly, md5 might still be visible in plaintext
+    # but there are lots of binary garbage around it. So regex should be tolerant.
+    if base_type == 3:
+        m = re.search(r'md5="([^"]{32})"', content, re.IGNORECASE)
+        if m: return m.group(1)
+        m = re.search(r'md5=([^" ]{32})', content, re.IGNORECASE)
+        if m: return m.group(1)
+        # Sometime WeChat puts md5 in pure binary without md5="" wrapper, let's just find 32 char hex if possible?
+        # A bit risky. Let's stick to the tags.
+        m = re.search(r'([a-fA-F0-9]{32})', content)
+        if m: return m.group(1).lower()
+    elif base_type == 43:
+        m = re.search(r'md5="([^"]+)"', content, re.IGNORECASE)
+        if m: return m.group(1)
+    elif base_type == 34:
+        m = re.search(r'clientmsgid="([^"]+)"', content, re.IGNORECASE)
+        if m: return m.group(1)
+    return None
+def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_username=None, packed_info_data=None):
     """尝试解析媒体文件在磁盘上的路径。
 
     Args:
@@ -291,27 +337,53 @@ def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_userna
 
         sub_dir_name = "Img" if base_type == 3 else ("Video" if base_type == 43 else "Voice")
 
+        target_md5 = None
+        if packed_info_data:
+            m_packed = re.search(r'([a-f0-9]{32})', str(packed_info_data), re.IGNORECASE)
+            if m_packed:
+                target_md5 = m_packed.group(1).lower()
+        if not target_md5:
+            target_md5 = _extract_md5_from_xml(content, base_type)
+                
         for d in search_dirs:
             sub = os.path.join(attach_dir, d, date_prefix, sub_dir_name)
             if os.path.isdir(sub):
-                files = [f for f in os.listdir(sub) if not f.endswith("_h.dat")]
-                if files:
-                    # 返回目录路径（具体是哪个文件无法从 XML 精确匹配）
-                    sample = files[0]
-                    return os.path.join(sub, sample), True
+                if target_md5:
+                    # 如果有 md5，精确匹配文件
+                    # print(f"DEBUG: searching in {sub} for {target_md5}, files: {os.listdir(sub)[:5]}...")
+                    for f in os.listdir(sub):
+                        if target_md5 in f and not f.endswith("_h.dat") and not f.endswith("_t.dat"):
+                            return os.path.join(sub, f), True
+                    # 如果没找到原图，退而求其次找缩略图
+                    for f in os.listdir(sub):
+                        if target_md5 in f:
+                            return os.path.join(sub, f), True
+                else:
+                    # 退化为返回第一个文件（主要针对旧数据或语音等无法解析 md5 的情况）
+                    files = [f for f in os.listdir(sub) if not f.endswith("_h.dat")]
+                    if files:
+                        return os.path.join(sub, files[0]), True
 
         # 视频：也检查 msg/video/
         if base_type == 43:
             video_dir = os.path.join(msg_dir, "video", date_prefix)
             if os.path.isdir(video_dir):
-                thumbs = [f for f in os.listdir(video_dir) if f.endswith("_thumb.jpg")]
-                if thumbs:
-                    return os.path.join(video_dir, thumbs[0]), True
+                if target_md5:
+                    for f in os.listdir(video_dir):
+                        if target_md5 in f and not f.endswith("_thumb.jpg"):
+                            return os.path.join(video_dir, f), True
+                    for f in os.listdir(video_dir):
+                        if target_md5 in f:
+                            return os.path.join(video_dir, f), True
+                else:
+                    thumbs = [f for f in os.listdir(video_dir) if f.endswith("_thumb.jpg")]
+                    if thumbs:
+                        return os.path.join(video_dir, thumbs[0]), True
 
     return None, False
 
 
-def _format_message_text(local_id, local_type, content, is_group, chat_username, chat_display_name, names, display_name_fn, db_dir=None, create_time_ts=0, resolve_media=False):
+def _format_message_text(local_id, local_type, content, is_group, chat_username, chat_display_name, names, display_name_fn, db_dir=None, create_time_ts=0, resolve_media=False, packed_info_data=None):
     sender, text = _parse_message_content(content, local_type, is_group)
     base_type, _ = _split_msg_type(local_type)
 
@@ -320,7 +392,7 @@ def _format_message_text(local_id, local_type, content, is_group, chat_username,
     if resolve_media and db_dir and content:
         try:
             media_path, media_exists = _resolve_media_path(
-                db_dir, content, local_type, create_time_ts, chat_username
+                db_dir, content, local_type, create_time_ts, chat_username, packed_info_data
             )
         except Exception:
             pass
@@ -411,7 +483,7 @@ def _query_messages(conn, table_name, start_ts=None, end_ts=None, keyword='', li
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ''
     sql = f"""
         SELECT local_id, local_type, create_time, real_sender_id, message_content,
-               WCDB_CT_message_content
+               WCDB_CT_message_content, packed_info_data
         FROM [{table_name}]
         {where_sql}
         ORDER BY create_time DESC
@@ -511,14 +583,19 @@ def _page_ranked_entries(entries, limit, offset):
 # ---- 构建行 ----
 
 def _build_history_line(row, ctx, names, id_to_username, display_name_fn, resolve_media=False, db_dir=None):
-    local_id, local_type, create_time, real_sender_id, content, ct = row
+    # Depending on whether packed_info_data was selected
+    if len(row) == 7:
+        local_id, local_type, create_time, real_sender_id, content, ct, packed_info_data = row
+    else:
+        local_id, local_type, create_time, real_sender_id, content, ct = row
+        packed_info_data = None
     time_str = datetime.fromtimestamp(create_time).strftime('%Y-%m-%d %H:%M')
     content = decompress_content(content, ct)
     if content is None:
         content = '(无法解压)'
     sender, text = _format_message_text(
         local_id, local_type, content, ctx['is_group'], ctx['username'], ctx['display_name'], names, display_name_fn,
-        db_dir=db_dir, create_time_ts=create_time, resolve_media=resolve_media,
+        db_dir=db_dir, create_time_ts=create_time, resolve_media=resolve_media, packed_info_data=packed_info_data
     )
     sender_label = _resolve_sender_label(
         real_sender_id, sender, ctx['is_group'], ctx['username'], ctx['display_name'], names, id_to_username, display_name_fn
@@ -529,13 +606,17 @@ def _build_history_line(row, ctx, names, id_to_username, display_name_fn, resolv
 
 
 def _build_search_entry(row, ctx, names, id_to_username, display_name_fn, resolve_media=False, db_dir=None):
-    local_id, local_type, create_time, real_sender_id, content, ct = row
+    if len(row) == 7:
+        local_id, local_type, create_time, real_sender_id, content, ct, packed_info_data = row
+    else:
+        local_id, local_type, create_time, real_sender_id, content, ct = row
+        packed_info_data = None
     content = decompress_content(content, ct)
     if content is None:
         return None
     sender, text = _format_message_text(
         local_id, local_type, content, ctx['is_group'], ctx['username'], ctx['display_name'], names, display_name_fn,
-        db_dir=db_dir, create_time_ts=create_time, resolve_media=resolve_media,
+        db_dir=db_dir, create_time_ts=create_time, resolve_media=resolve_media, packed_info_data=packed_info_data
     )
     if text and len(text) > 300:
         text = text[:300] + '...'
